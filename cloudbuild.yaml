@@ -1,0 +1,63 @@
+steps:
+  # Send build notification to slack channel
+- name: 'gcr.io/$PROJECT_ID/slackbot'
+  args: [ '--build', '$BUILD_ID',
+          '--webhook', '$_SLACK_WEBHOOK', '--copy-timeout' ]
+  timeout: 3600s
+
+  #pre-flight to handle .env
+- name: 'gcr.io/cloud-builders/gsutil'
+  args: ['cp', 'gs://$_BUCKET_CONFIG_NAME/adab-fe/env/$_ENVIRONMENT/.env', '.']
+  timeout: 1800s
+
+  # Install node package
+- name: 'node:14-buster-slim'
+  id: Yarn-install
+  args: ['yarn']
+  timeout: 1800s
+
+# Build Image (Test, Build, Export)
+- name: 'gcr.io/cloud-builders/docker'
+  id: Build-docker-image
+  args: ['build', '--target', 'server', '-t', 'asia.gcr.io/$PROJECT_ID/$_ENVIRONMENT/adab-fe:$SHORT_SHA', '.']
+  timeout: 3600s
+
+
+# Push Image
+- name: 'gcr.io/cloud-builders/docker'
+  id: Push-docker-image
+  args: ['push', 'asia.gcr.io/$PROJECT_ID/$_ENVIRONMENT/adab-fe:$SHORT_SHA']
+  timeout: 1800s
+
+# Subtitution for deployment.yml
+- name: 'gcr.io/$PROJECT_ID/envsubst'
+  id: envSubst-for-deployment.yml
+  env: 
+    - '_ENVIRONMENT=$_ENVIRONMENT'
+    - 'SHORT_SHA=$SHORT_SHA'
+    - 'PROJECT_ID=$PROJECT_ID'
+    - '_K8_INGRESS_NAME=$_K8_INGRESS_NAME'
+    - '_K8_STATIC_INGRESS_ADDR=$_K8_STATIC_INGRESS_ADDR'
+    - '_K8_CERT_NAME=$_K8_CERT_NAME'
+    - '_K8_DOMAIN_FE=$_K8_DOMAIN_FE'
+    - '_K8_BACKEND_CONF_NAME=$_K8_BACKEND_CONF_NAME'
+    - '_K8_ARMOR_POLICY_NAME=$_K8_ARMOR_POLICY_NAME'
+    - '_K8_MAX_POD_REPLICA=$_K8_MAX_POD_REPLICA'
+    - '_K8_MIN_POD_REPLICA=$_K8_MIN_POD_REPLICA'
+    - '_K8_CPU_AUTOSCALE_PERCENTAGE=$_K8_CPU_AUTOSCALE_PERCENTAGE'
+  args: ['deployment.yml']
+  timeout: 1800s
+
+# Deployment
+- name: "gcr.io/cloud-builders/gke-deploy"
+  id: Deploy-to-GKE-Cluster 
+  args:
+  - run
+  - --filename=deployment.yml
+  - --cluster=$_CLUSTER_NAME
+  - --location=$_GCP_ZONE
+  timeout: 1800s
+
+# Global Timeout
+timeout: '3600s'
+
